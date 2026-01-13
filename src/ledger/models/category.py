@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 
-@dataclass(slots=True)
+@dataclass
 class Category:
     """分类数据模型"""
     id: Optional[int] = None

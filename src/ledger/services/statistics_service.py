@@ -9,7 +9,7 @@ from ledger.db.database import Database
 GranularityType = Literal["day", "week", "month", "year"]
 
 
-@dataclass(slots=True)
+@dataclass
 class PeriodSummary:
     """期间汇总数据"""
     income_cents: int = 0

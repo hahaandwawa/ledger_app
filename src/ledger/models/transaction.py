@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 
-@dataclass(slots=True)
+@dataclass
 class Transaction:
     """记账交易数据模型"""
     id: Optional[int] = None
