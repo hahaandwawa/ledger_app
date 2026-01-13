@@ -12,6 +12,8 @@ from PySide6.QtGui import QCloseEvent, QAction, QKeySequence, QShortcut
 
 from ledger.db.database import Database
 from ledger.models.transaction import Transaction
+from ledger.models.category import Category
+from ledger.models.account import Account
 from ledger.services.statistics_service import StatisticsService
 from ledger.settings import format_money
 from ledger.ui.transaction_model import TransactionTableModel
@@ -202,6 +204,44 @@ class MainWindow(QMainWindow):
         row = indexes[0].row()
         return self.transaction_model.get_transaction(row)
     
+    def _ensure_category_exists(self, category_name: str, tx_type: str) -> None:
+        """确保分类存在于数据库中，如果不存在则自动创建"""
+        if not category_name:
+            return
+        
+        # 检查是否已存在
+        existing = self.db.get_all_categories()
+        if any(cat.name == category_name for cat in existing):
+            return
+        
+        # 不存在，自动创建
+        try:
+            new_cat = Category(name=category_name, type=tx_type)
+            self.db.add_category(new_cat)
+            logger.info(f"自动创建分类: {category_name} (type={tx_type})")
+        except sqlite3.IntegrityError:
+            # 可能是并发创建，忽略
+            pass
+    
+    def _ensure_account_exists(self, account_name: str) -> None:
+        """确保账户存在于数据库中，如果不存在则自动创建"""
+        if not account_name:
+            return
+        
+        # 检查是否已存在
+        existing = self.db.get_all_accounts()
+        if any(acc.name == account_name for acc in existing):
+            return
+        
+        # 不存在，自动创建（默认类型为 other）
+        try:
+            new_acc = Account(name=account_name, type="other")
+            self.db.add_account(new_acc)
+            logger.info(f"自动创建账户: {account_name}")
+        except sqlite3.IntegrityError:
+            # 可能是并发创建，忽略
+            pass
+    
     def _on_new_transaction(self) -> None:
         """新增交易"""
         categories = self.db.get_all_categories()
@@ -219,6 +259,10 @@ class MainWindow(QMainWindow):
             tx = dialog.get_result()
             if tx:
                 try:
+                    # 自动将新分类/账户添加到数据库（长期记忆）
+                    self._ensure_category_exists(tx.category, tx.type)
+                    self._ensure_account_exists(tx.account)
+                    
                     self.db.add_transaction(tx)
                     # 记忆选择
                     self._last_category = tx.category
@@ -253,6 +297,10 @@ class MainWindow(QMainWindow):
             updated_tx = dialog.get_result()
             if updated_tx:
                 try:
+                    # 自动将新分类/账户添加到数据库（长期记忆）
+                    self._ensure_category_exists(updated_tx.category, updated_tx.type)
+                    self._ensure_account_exists(updated_tx.account)
+                    
                     self.db.update_transaction(updated_tx)
                     self._refresh_all()
                     self.statusbar.showMessage("交易已更新", 3000)

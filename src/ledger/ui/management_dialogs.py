@@ -133,19 +133,32 @@ class CategoryManagementWidget(QWidget):
         if not name:
             QMessageBox.warning(self, "错误", "请输入分类名称")
             return
+        
+        cat_type = self.type_combo.currentData()
+        is_update = self._editing_id is not None
+        
         try:
-            cat = Category(id=self._editing_id, name=name, type=self.type_combo.currentData())
-            if cat.id:
+            cat = Category(id=self._editing_id, name=name, type=cat_type)
+            if is_update:
                 self.db.update_category(cat)
             else:
                 self.db.add_category(cat)
+            
+            # 保存成功：刷新列表并显示提示
             self._load_data()
             self._clear_form()
             self.category_list.clearSelection()
+            
+            action = "更新" if is_update else "新增"
+            QMessageBox.information(self, "成功", f"分类「{name}」已{action}保存")
+            
         except sqlite3.IntegrityError:
-            QMessageBox.warning(self, "错误", "分类名称已存在")
+            QMessageBox.warning(
+                self, "无法保存", 
+                f"分类名称「{name}」已存在，请使用其他名称。"
+            )
         except Exception as e:
-            QMessageBox.critical(self, "错误", f"保存失败: {e}")
+            QMessageBox.critical(self, "保存失败", f"数据库错误: {e}")
     
     def _on_delete(self) -> None:
         row = self.category_list.currentRow()
@@ -245,19 +258,32 @@ class AccountManagementWidget(QWidget):
         if not name:
             QMessageBox.warning(self, "错误", "请输入账户名称")
             return
+        
+        acc_type = self.type_combo.currentData()
+        is_update = self._editing_id is not None
+        
         try:
-            acc = Account(id=self._editing_id, name=name, type=self.type_combo.currentData())
-            if acc.id:
+            acc = Account(id=self._editing_id, name=name, type=acc_type)
+            if is_update:
                 self.db.update_account(acc)
             else:
                 self.db.add_account(acc)
+            
+            # 保存成功：刷新列表并显示提示
             self._load_data()
             self._clear_form()
             self.account_list.clearSelection()
+            
+            action = "更新" if is_update else "新增"
+            QMessageBox.information(self, "成功", f"账户「{name}」已{action}保存")
+            
         except sqlite3.IntegrityError:
-            QMessageBox.warning(self, "错误", "账户名称已存在")
+            QMessageBox.warning(
+                self, "无法保存",
+                f"账户名称「{name}」已存在，请使用其他名称。"
+            )
         except Exception as e:
-            QMessageBox.critical(self, "错误", f"保存失败: {e}")
+            QMessageBox.critical(self, "保存失败", f"数据库错误: {e}")
     
     def _on_delete(self) -> None:
         row = self.account_list.currentRow()

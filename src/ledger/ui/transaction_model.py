@@ -70,9 +70,8 @@ class TransactionTableModel(QAbstractTableModel):
                 return tx.note or ""
         
         elif role == Qt.TextAlignmentRole:
-            if col == TransactionColumn.AMOUNT:
-                return Qt.AlignRight | Qt.AlignVCenter
-            return Qt.AlignLeft | Qt.AlignVCenter
+            # PM规则：所有列统一水平居中 + 垂直居中
+            return Qt.AlignCenter
         
         elif role == Qt.ForegroundRole:
             if col in (TransactionColumn.TYPE, TransactionColumn.AMOUNT):
