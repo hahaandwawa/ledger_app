@@ -1,12 +1,12 @@
 """统计分析页面组件模块"""
 from datetime import date
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QComboBox, QDateEdit, QPushButton, QTableWidget,
     QTableWidgetItem, QHeaderView, QGroupBox, QGridLayout,
-    QCheckBox
+    QCheckBox, QScrollArea, QFrame
 )
 from PySide6.QtCore import Qt, QDate, QRectF
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush
@@ -132,7 +132,7 @@ class TrendChartWidget(QWidget):
     - X轴显示时间标签
     - Y轴显示金额（USD）
     - 两条折线：支出（红）和收入（绿）
-    - 支持显示/隐藏收入折线
+    - 通过分类筛选控制各线显示内容
     - 自动适配深色/浅色主题
     """
     
@@ -140,15 +140,13 @@ class TrendChartWidget(QWidget):
         super().__init__(parent)
         self._data: List[Dict[str, Any]] = []
         self._granularity: str = "day"  # "day", "week", "month", "year"
-        self._show_income: bool = True  # 是否显示收入折线
         self.setMinimumHeight(250)
         self.setMinimumWidth(300)  # 确保有足够的宽度绘制图表
     
     def set_data(
         self,
         data: List[Dict[str, Any]],
-        granularity: str = "day",
-        show_income: bool = True
+        granularity: str = "day"
     ) -> None:
         """
         设置趋势数据
@@ -156,16 +154,9 @@ class TrendChartWidget(QWidget):
         Args:
             data: [{"label": str, "income": float, "expense": float}, ...]
             granularity: "day", "week", "month", "year"
-            show_income: 是否显示收入折线
         """
         self._data = data
         self._granularity = granularity
-        self._show_income = show_income
-        self.update()
-    
-    def set_show_income(self, show: bool) -> None:
-        """设置是否显示收入折线"""
-        self._show_income = show
         self.update()
     
     def paintEvent(self, event) -> None:
@@ -180,12 +171,12 @@ class TrendChartWidget(QWidget):
             painter.drawText(self.rect(), Qt.AlignCenter, "该时间段没有收支记录")
             return
         
-        # 检查是否所有数据都为0（根据是否显示收入来判断）
-        total_income = sum(item.get("income", 0) for item in self._data) if self._show_income else 0
+        # 检查是否所有数据都为0
+        total_income = sum(item.get("income", 0) for item in self._data)
         total_expense = sum(item.get("expense", 0) for item in self._data)
-        if total_expense == 0 and (not self._show_income or total_income == 0):
+        if total_expense == 0 and total_income == 0:
             painter.setPen(text_color)
-            painter.drawText(self.rect(), Qt.AlignCenter, "该时间段没有收支记录")
+            painter.drawText(self.rect(), Qt.AlignCenter, "该时间段没有收支记录\n（或所有分类均未选中）")
             return
         
         # 布局参数
@@ -200,13 +191,10 @@ class TrendChartWidget(QWidget):
         if chart_width <= 0 or chart_height <= 0:
             return
         
-        # 计算Y轴最大值（根据是否显示收入来决定）
+        # 计算Y轴最大值
         max_expense = max((item.get("expense", 0) for item in self._data), default=0)
-        if self._show_income:
-            max_income = max((item.get("income", 0) for item in self._data), default=0)
-            max_value = max(max_expense, max_income, 1)
-        else:
-            max_value = max(max_expense, 1)
+        max_income = max((item.get("income", 0) for item in self._data), default=0)
+        max_value = max(max_expense, max_income, 1)
         
         # 添加10%余量
         max_value = max_value * 1.1
@@ -225,8 +213,7 @@ class TrendChartWidget(QWidget):
             expense_y = margin_top + chart_height - (expense_val / max_value * chart_height) if max_value > 0 else margin_top + chart_height
             income_y = margin_top + chart_height - (income_val / max_value * chart_height) if max_value > 0 else margin_top + chart_height
             expense_points.append((x, expense_y))
-            if self._show_income:
-                income_points.append((x, income_y))
+            income_points.append((x, income_y))
         
         # 绘制Y轴网格线和标签
         self._draw_y_axis(painter, text_color, margin_left, margin_top, chart_height, max_value)
@@ -234,13 +221,14 @@ class TrendChartWidget(QWidget):
         # 绘制X轴标签
         self._draw_x_axis(painter, text_color, margin_left, margin_top, chart_height, step_x)
         
-        # 绘制折线和数据点
-        self._draw_line_with_points(painter, expense_points, COLOR_EXPENSE)
-        if self._show_income:
+        # 绘制折线和数据点（只有有数据时才绘制）
+        if total_expense > 0:
+            self._draw_line_with_points(painter, expense_points, COLOR_EXPENSE)
+        if total_income > 0:
             self._draw_line_with_points(painter, income_points, COLOR_INCOME)
         
         # 绘制图例
-        self._draw_legend(painter, text_color)
+        self._draw_legend(painter, text_color, total_income > 0, total_expense > 0)
     
     def _draw_line_with_points(self, painter: QPainter, points: List[Tuple[float, float]], color: str) -> None:
         """绘制折线和数据点"""
@@ -334,23 +322,28 @@ class TrendChartWidget(QWidget):
                 painter.drawText(0, 0, label)
                 painter.restore()
     
-    def _draw_legend(self, painter: QPainter, text_color: QColor) -> None:
+    def _draw_legend(self, painter: QPainter, text_color: QColor, 
+                     has_income: bool = True, has_expense: bool = True) -> None:
         """绘制图例"""
         legend_y = self.height() - 15
         legend_x = self.width() - 150
         
-        # 支出图例
-        painter.setPen(QPen(QColor(COLOR_EXPENSE), 2))
-        painter.drawLine(legend_x, legend_y, legend_x + 20, legend_y)
-        painter.setPen(text_color)
-        painter.drawText(legend_x + 25, legend_y + 4, "支出")
+        offset = 0
         
-        # 收入图例（仅在显示收入时绘制）
-        if self._show_income:
-            painter.setPen(QPen(QColor(COLOR_INCOME), 2))
-            painter.drawLine(legend_x + 70, legend_y, legend_x + 90, legend_y)
+        # 支出图例（仅在有支出数据时绘制）
+        if has_expense:
+            painter.setPen(QPen(QColor(COLOR_EXPENSE), 2))
+            painter.drawLine(legend_x + offset, legend_y, legend_x + offset + 20, legend_y)
             painter.setPen(text_color)
-            painter.drawText(legend_x + 95, legend_y + 4, "收入")
+            painter.drawText(legend_x + offset + 25, legend_y + 4, "支出")
+            offset += 70
+        
+        # 收入图例（仅在有收入数据时绘制）
+        if has_income:
+            painter.setPen(QPen(QColor(COLOR_INCOME), 2))
+            painter.drawLine(legend_x + offset, legend_y, legend_x + offset + 20, legend_y)
+            painter.setPen(text_color)
+            painter.drawText(legend_x + offset + 25, legend_y + 4, "收入")
 
 
 class StatisticsWidget(QWidget):
@@ -452,11 +445,11 @@ class StatisticsWidget(QWidget):
         trend_group = QGroupBox("收支趋势")
         trend_layout = QVBoxLayout(trend_group)
         
-        # 趋势图控制区
-        trend_controls = QHBoxLayout()
+        # 趋势图控制区 - 第一行：粒度选择
+        trend_controls_row1 = QHBoxLayout()
         
         # 时间粒度选择器
-        trend_controls.addWidget(QLabel("粒度:"))
+        trend_controls_row1.addWidget(QLabel("粒度:"))
         self.granularity_combo = QComboBox()
         self.granularity_combo.addItem("日", "day")
         self.granularity_combo.addItem("周", "week")
@@ -464,27 +457,65 @@ class StatisticsWidget(QWidget):
         self.granularity_combo.addItem("年", "year")
         self.granularity_combo.setCurrentIndex(0)  # 默认：日
         self.granularity_combo.currentIndexChanged.connect(self._refresh_trend_chart)
-        trend_controls.addWidget(self.granularity_combo)
+        trend_controls_row1.addWidget(self.granularity_combo)
         
-        trend_controls.addSpacing(15)
+        trend_controls_row1.addStretch()
+        trend_layout.addLayout(trend_controls_row1)
         
-        # 显示收入复选框
-        self.show_income_checkbox = QCheckBox("显示收入")
-        self.show_income_checkbox.setChecked(True)  # 默认勾选
-        self.show_income_checkbox.stateChanged.connect(self._refresh_trend_chart)
-        trend_controls.addWidget(self.show_income_checkbox)
-        
-        trend_controls.addSpacing(15)
+        # 趋势图控制区 - 第二行：分类筛选勾选框
+        category_filter_layout = QHBoxLayout()
         
         # 支出分类筛选
-        trend_controls.addWidget(QLabel("支出分类:"))
-        self.category_filter_combo = QComboBox()
-        self.category_filter_combo.addItem("全部支出", None)
-        self.category_filter_combo.currentIndexChanged.connect(self._refresh_trend_chart)
-        trend_controls.addWidget(self.category_filter_combo)
+        expense_filter_group = QGroupBox("支出分类筛选")
+        expense_filter_layout = QVBoxLayout(expense_filter_group)
+        expense_filter_layout.setSpacing(2)
+        expense_filter_layout.setContentsMargins(5, 5, 5, 5)
         
-        trend_controls.addStretch()
-        trend_layout.addLayout(trend_controls)
+        # 支出分类勾选框容器
+        self.expense_checkboxes_widget = QWidget()
+        self.expense_checkboxes_layout = QHBoxLayout(self.expense_checkboxes_widget)
+        self.expense_checkboxes_layout.setSpacing(8)
+        self.expense_checkboxes_layout.setContentsMargins(0, 0, 0, 0)
+        self.expense_category_checkboxes: Dict[str, QCheckBox] = {}
+        
+        # 添加滚动区域支持多分类
+        expense_scroll = QScrollArea()
+        expense_scroll.setWidgetResizable(True)
+        expense_scroll.setWidget(self.expense_checkboxes_widget)
+        expense_scroll.setMaximumHeight(50)
+        expense_scroll.setFrameShape(QFrame.NoFrame)
+        expense_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        expense_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        expense_filter_layout.addWidget(expense_scroll)
+        
+        category_filter_layout.addWidget(expense_filter_group, 1)
+        
+        # 收入分类筛选
+        income_filter_group = QGroupBox("收入分类筛选")
+        income_filter_layout = QVBoxLayout(income_filter_group)
+        income_filter_layout.setSpacing(2)
+        income_filter_layout.setContentsMargins(5, 5, 5, 5)
+        
+        # 收入分类勾选框容器
+        self.income_checkboxes_widget = QWidget()
+        self.income_checkboxes_layout = QHBoxLayout(self.income_checkboxes_widget)
+        self.income_checkboxes_layout.setSpacing(8)
+        self.income_checkboxes_layout.setContentsMargins(0, 0, 0, 0)
+        self.income_category_checkboxes: Dict[str, QCheckBox] = {}
+        
+        # 添加滚动区域支持多分类
+        income_scroll = QScrollArea()
+        income_scroll.setWidgetResizable(True)
+        income_scroll.setWidget(self.income_checkboxes_widget)
+        income_scroll.setMaximumHeight(50)
+        income_scroll.setFrameShape(QFrame.NoFrame)
+        income_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        income_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        income_filter_layout.addWidget(income_scroll)
+        
+        category_filter_layout.addWidget(income_filter_group, 1)
+        
+        trend_layout.addLayout(category_filter_layout)
         
         # 趋势图
         self.trend_chart = TrendChartWidget()
@@ -550,35 +581,84 @@ class StatisticsWidget(QWidget):
             self.category_table.setItem(i, 1, QTableWidgetItem(format_money_from_float(item['amount'])))
             self.category_table.setItem(i, 2, QTableWidgetItem(f"{item['percentage']:.1f}%"))
         
-        # 更新支出分类筛选下拉框
-        self._update_category_filter(category_data)
+        # 更新分类筛选勾选框
+        self._update_category_filters()
         
         # 刷新趋势图
         self._refresh_trend_chart()
 
-    def _update_category_filter(self, category_data: List[Dict[str, Any]]) -> None:
-        """更新支出分类筛选下拉框"""
-        # 保存当前选中项
-        current_category = self.category_filter_combo.currentData()
+    def _update_category_filters(self) -> None:
+        """更新收入和支出分类筛选勾选框"""
+        start, end = self._get_date_range()
         
-        # 暂时断开信号，避免触发刷新
-        self.category_filter_combo.blockSignals(True)
+        # 获取当前时间范围内实际有数据的分类
+        expense_categories = self.stats_service.get_expense_categories(start, end)
+        income_categories = self.stats_service.get_income_categories(start, end)
         
-        # 清空并重新填充
-        self.category_filter_combo.clear()
-        self.category_filter_combo.addItem("全部支出", None)
+        # 更新支出分类勾选框
+        self._update_checkboxes(
+            expense_categories,
+            self.expense_category_checkboxes,
+            self.expense_checkboxes_layout,
+            "expense"
+        )
         
-        for item in category_data:
-            category_name = item["category"]
-            self.category_filter_combo.addItem(category_name, category_name)
+        # 更新收入分类勾选框
+        self._update_checkboxes(
+            income_categories,
+            self.income_category_checkboxes,
+            self.income_checkboxes_layout,
+            "income"
+        )
+    
+    def _update_checkboxes(
+        self,
+        categories: List[str],
+        checkbox_dict: Dict[str, QCheckBox],
+        layout: QHBoxLayout,
+        category_type: str
+    ) -> None:
+        """更新指定类型的分类勾选框"""
+        # 保存当前选中状态（只保存真正的 QCheckBox，跳过占位符）
+        current_checked = {}
+        for name, widget in checkbox_dict.items():
+            if isinstance(widget, QCheckBox):
+                current_checked[name] = widget.isChecked()
         
-        # 尝试恢复之前的选中项
-        if current_category:
-            index = self.category_filter_combo.findData(current_category)
-            if index >= 0:
-                self.category_filter_combo.setCurrentIndex(index)
+        # 清除现有控件（勾选框和占位符）
+        for widget in list(checkbox_dict.values()):
+            if hasattr(widget, 'blockSignals'):
+                widget.blockSignals(True)
+            layout.removeWidget(widget)
+            widget.deleteLater()
+        checkbox_dict.clear()
         
-        self.category_filter_combo.blockSignals(False)
+        # 清除布局中的弹性空间
+        while layout.count() > 0:
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        # 如果没有分类，显示提示
+        if not categories:
+            placeholder = QLabel("（无数据）")
+            placeholder.setStyleSheet("color: gray; font-style: italic;")
+            layout.addWidget(placeholder)
+            # 保存引用以便后续清除（使用特殊key，不会被当作分类处理）
+            checkbox_dict["__placeholder__"] = placeholder  # type: ignore
+            return
+        
+        # 创建新的勾选框
+        for category_name in categories:
+            checkbox = QCheckBox(category_name)
+            # 恢复之前的选中状态，新分类默认选中
+            checkbox.setChecked(current_checked.get(category_name, True))
+            checkbox.stateChanged.connect(self._refresh_trend_chart)
+            layout.addWidget(checkbox)
+            checkbox_dict[category_name] = checkbox
+        
+        # 添加弹性空间
+        layout.addStretch()
 
     def _refresh_trend_chart(self) -> None:
         """刷新趋势图（响应控件变化）"""
@@ -586,17 +666,40 @@ class StatisticsWidget(QWidget):
         
         # 获取当前控件状态
         granularity: GranularityType = self.granularity_combo.currentData() or "day"
-        show_income = self.show_income_checkbox.isChecked()
-        category = self.category_filter_combo.currentData()  # None 表示全部
+        
+        # 获取选中的收入分类
+        income_categories = self._get_selected_categories(self.income_category_checkboxes)
+        
+        # 获取选中的支出分类
+        expense_categories = self._get_selected_categories(self.expense_category_checkboxes)
         
         # 获取趋势数据
         trend_result = self.stats_service.get_trend_data_advanced(
-            start, end, granularity, category
+            start, end, granularity,
+            category=None,  # 不使用旧的单分类参数
+            income_categories=income_categories,
+            expense_categories=expense_categories
         )
         
         # 更新趋势图
         self.trend_chart.set_data(
             trend_result["data"],
-            trend_result["granularity"],
-            show_income
+            trend_result["granularity"]
         )
+    
+    def _get_selected_categories(self, checkbox_dict: Dict[str, QCheckBox]) -> Optional[List[str]]:
+        """获取选中的分类列表
+        
+        Returns:
+            选中的分类名称列表，如果没有勾选框则返回None（表示全部）
+        """
+        # 过滤掉占位符
+        checkboxes = {k: v for k, v in checkbox_dict.items() 
+                      if k != "__placeholder__" and isinstance(v, QCheckBox)}
+        
+        if not checkboxes:
+            # 没有勾选框（无数据），返回空列表（不计算）
+            return []
+        
+        # 返回选中的分类
+        return [name for name, cb in checkboxes.items() if cb.isChecked()]

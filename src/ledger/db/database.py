@@ -346,7 +346,7 @@ class Database:
     def get_daily_summary_by_category(
         self, start_date: str, end_date: str, category: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """获取每日汇总（支持分类筛选）
+        """获取每日汇总（支持单一分类筛选，已废弃，请使用 get_daily_summary_by_categories）
         
         Args:
             start_date: 开始日期
@@ -375,6 +375,76 @@ class Database:
         """, (category, start_date, end_date))
         
         return [{"date": row[0], "income": row[1], "expense": row[2]} for row in cursor.fetchall()]
+
+    def get_daily_summary_by_categories(
+        self,
+        start_date: str,
+        end_date: str,
+        income_categories: Optional[List[str]] = None,
+        expense_categories: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """获取每日汇总（支持多分类筛选）
+        
+        Args:
+            start_date: 开始日期
+            end_date: 结束日期
+            income_categories: 要包含的收入分类列表，None表示全部，空列表表示不计算收入
+            expense_categories: 要包含的支出分类列表，None表示全部，空列表表示不计算支出
+        
+        Returns:
+            [{"date": str, "income": int, "expense": int}, ...]
+        """
+        cursor = self.conn.cursor()
+        
+        # 如果都为None，直接返回全部汇总
+        if income_categories is None and expense_categories is None:
+            return self.get_daily_summary(start_date, end_date)
+        
+        # 构建动态SQL
+        params = []
+        
+        # 收入部分
+        if income_categories is None:
+            # 包含所有收入
+            income_sql = "SUM(CASE WHEN type = 'income' THEN amount_cents ELSE 0 END)"
+        elif len(income_categories) == 0:
+            # 不计算收入
+            income_sql = "0"
+        else:
+            # 只包含指定分类的收入
+            placeholders = ",".join(["?" for _ in income_categories])
+            income_sql = f"SUM(CASE WHEN type = 'income' AND category IN ({placeholders}) THEN amount_cents ELSE 0 END)"
+            params.extend(income_categories)
+        
+        # 支出部分
+        if expense_categories is None:
+            # 包含所有支出
+            expense_sql = "SUM(CASE WHEN type = 'expense' THEN amount_cents ELSE 0 END)"
+        elif len(expense_categories) == 0:
+            # 不计算支出
+            expense_sql = "0"
+        else:
+            # 只包含指定分类的支出
+            placeholders = ",".join(["?" for _ in expense_categories])
+            expense_sql = f"SUM(CASE WHEN type = 'expense' AND category IN ({placeholders}) THEN amount_cents ELSE 0 END)"
+            params.extend(expense_categories)
+        
+        # 添加日期参数
+        params.extend([start_date, end_date])
+        
+        query = f"""
+            SELECT 
+                date,
+                {income_sql} as income,
+                {expense_sql} as expense
+            FROM transactions
+            WHERE date >= ? AND date <= ?
+            GROUP BY date
+            ORDER BY date
+        """
+        
+        cursor.execute(query, params)
+        return [{"date": row[0], "income": row[1] or 0, "expense": row[2] or 0} for row in cursor.fetchall()]
 
     def close(self) -> None:
         """关闭数据库连接"""

@@ -208,7 +208,9 @@ class StatisticsService:
         start_date: str,
         end_date: str,
         granularity: GranularityType = "day",
-        category: Optional[str] = None
+        category: Optional[str] = None,
+        income_categories: Optional[List[str]] = None,
+        expense_categories: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
         获取高级趋势图数据，支持手动选择时间粒度和分类筛选
@@ -217,7 +219,9 @@ class StatisticsService:
             start_date: 开始日期 (YYYY-MM-DD)
             end_date: 结束日期 (YYYY-MM-DD)
             granularity: 时间粒度 ("day" | "week" | "month" | "year")
-            category: 可选的支出分类筛选（仅影响支出，收入不受影响）
+            category: 已废弃，保留兼容性。可选的单一支出分类筛选
+            income_categories: 要包含的收入分类列表，None表示全部，空列表表示不计算收入
+            expense_categories: 要包含的支出分类列表，None表示全部，空列表表示不计算支出
         
         Returns:
             {
@@ -229,26 +233,40 @@ class StatisticsService:
         end = datetime.strptime(end_date, "%Y-%m-%d").date()
         
         if granularity == "day":
-            return self._get_daily_trend_advanced(start, end, category)
+            return self._get_daily_trend_advanced(start, end, category, income_categories, expense_categories)
         elif granularity == "week":
-            return self._get_weekly_trend_advanced(start, end, category)
+            return self._get_weekly_trend_advanced(start, end, category, income_categories, expense_categories)
         elif granularity == "month":
-            return self._get_monthly_trend_advanced(start, end, category)
+            return self._get_monthly_trend_advanced(start, end, category, income_categories, expense_categories)
         elif granularity == "year":
-            return self._get_yearly_trend_advanced(start, end, category)
+            return self._get_yearly_trend_advanced(start, end, category, income_categories, expense_categories)
         else:
             # 默认按天
-            return self._get_daily_trend_advanced(start, end, category)
+            return self._get_daily_trend_advanced(start, end, category, income_categories, expense_categories)
 
     def _get_daily_trend_advanced(
-        self, start: date, end: date, category: Optional[str] = None
+        self,
+        start: date,
+        end: date,
+        category: Optional[str] = None,
+        income_categories: Optional[List[str]] = None,
+        expense_categories: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """按天聚合，支持分类筛选"""
-        raw_data = self.db.get_daily_summary_by_category(
-            start.strftime("%Y-%m-%d"),
-            end.strftime("%Y-%m-%d"),
-            category
-        )
+        # 优先使用新的多分类参数，如果未指定则使用旧的单分类参数
+        if income_categories is not None or expense_categories is not None:
+            raw_data = self.db.get_daily_summary_by_categories(
+                start.strftime("%Y-%m-%d"),
+                end.strftime("%Y-%m-%d"),
+                income_categories,
+                expense_categories
+            )
+        else:
+            raw_data = self.db.get_daily_summary_by_category(
+                start.strftime("%Y-%m-%d"),
+                end.strftime("%Y-%m-%d"),
+                category
+            )
         
         data_map = {item["date"]: item for item in raw_data}
         
@@ -274,14 +292,28 @@ class StatisticsService:
         return {"granularity": "day", "data": result}
 
     def _get_weekly_trend_advanced(
-        self, start: date, end: date, category: Optional[str] = None
+        self,
+        start: date,
+        end: date,
+        category: Optional[str] = None,
+        income_categories: Optional[List[str]] = None,
+        expense_categories: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """按周（ISO周）聚合，支持分类筛选"""
-        raw_data = self.db.get_daily_summary_by_category(
-            start.strftime("%Y-%m-%d"),
-            end.strftime("%Y-%m-%d"),
-            category
-        )
+        # 优先使用新的多分类参数，如果未指定则使用旧的单分类参数
+        if income_categories is not None or expense_categories is not None:
+            raw_data = self.db.get_daily_summary_by_categories(
+                start.strftime("%Y-%m-%d"),
+                end.strftime("%Y-%m-%d"),
+                income_categories,
+                expense_categories
+            )
+        else:
+            raw_data = self.db.get_daily_summary_by_category(
+                start.strftime("%Y-%m-%d"),
+                end.strftime("%Y-%m-%d"),
+                category
+            )
         
         # 按ISO周聚合
         weekly_map: Dict[str, Dict[str, int]] = {}
@@ -322,14 +354,28 @@ class StatisticsService:
         return {"granularity": "week", "data": result}
 
     def _get_monthly_trend_advanced(
-        self, start: date, end: date, category: Optional[str] = None
+        self,
+        start: date,
+        end: date,
+        category: Optional[str] = None,
+        income_categories: Optional[List[str]] = None,
+        expense_categories: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """按月聚合，支持分类筛选"""
-        raw_data = self.db.get_daily_summary_by_category(
-            start.strftime("%Y-%m-%d"),
-            end.strftime("%Y-%m-%d"),
-            category
-        )
+        # 优先使用新的多分类参数，如果未指定则使用旧的单分类参数
+        if income_categories is not None or expense_categories is not None:
+            raw_data = self.db.get_daily_summary_by_categories(
+                start.strftime("%Y-%m-%d"),
+                end.strftime("%Y-%m-%d"),
+                income_categories,
+                expense_categories
+            )
+        else:
+            raw_data = self.db.get_daily_summary_by_category(
+                start.strftime("%Y-%m-%d"),
+                end.strftime("%Y-%m-%d"),
+                category
+            )
         
         # 按月聚合
         monthly_map: Dict[str, Dict[str, int]] = {}
@@ -369,14 +415,28 @@ class StatisticsService:
         return {"granularity": "month", "data": result}
 
     def _get_yearly_trend_advanced(
-        self, start: date, end: date, category: Optional[str] = None
+        self,
+        start: date,
+        end: date,
+        category: Optional[str] = None,
+        income_categories: Optional[List[str]] = None,
+        expense_categories: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """按年聚合，支持分类筛选"""
-        raw_data = self.db.get_daily_summary_by_category(
-            start.strftime("%Y-%m-%d"),
-            end.strftime("%Y-%m-%d"),
-            category
-        )
+        # 优先使用新的多分类参数，如果未指定则使用旧的单分类参数
+        if income_categories is not None or expense_categories is not None:
+            raw_data = self.db.get_daily_summary_by_categories(
+                start.strftime("%Y-%m-%d"),
+                end.strftime("%Y-%m-%d"),
+                income_categories,
+                expense_categories
+            )
+        else:
+            raw_data = self.db.get_daily_summary_by_category(
+                start.strftime("%Y-%m-%d"),
+                end.strftime("%Y-%m-%d"),
+                category
+            )
         
         # 按年聚合
         yearly_map: Dict[str, Dict[str, int]] = {}
@@ -410,6 +470,22 @@ class StatisticsService:
         """获取时间范围内的所有支出分类名称"""
         raw_data = self.db.get_category_summary(start_date, end_date, "expense")
         return [item["category"] for item in raw_data]
+
+    def get_income_categories(self, start_date: str, end_date: str) -> List[str]:
+        """获取时间范围内的所有收入分类名称"""
+        raw_data = self.db.get_category_summary(start_date, end_date, "income")
+        return [item["category"] for item in raw_data]
+
+    def get_all_categories_by_type(self) -> Dict[str, List[str]]:
+        """获取所有分类，按类型分组（从categories表）"""
+        categories = self.db.get_all_categories()
+        result = {"income": [], "expense": []}
+        for cat in categories:
+            if cat.type in ("income", "both"):
+                result["income"].append(cat.name)
+            if cat.type in ("expense", "both"):
+                result["expense"].append(cat.name)
+        return result
 
     def get_month_over_month_change(self) -> Dict[str, Any]:
         """获取环比变化（本月vs上月）"""
